@@ -240,7 +240,7 @@ update g _ = handleMusic =<< (case state g of
                                                                     then loadLevel "level0" (g {state = OverWorld
                                                                                                , levelTransDelay = 0
                                                                                                , shouldPlay = map (const False) $ shouldPlay g})
-                                                                    else titleLax)
+                                                                    else titleLax (g {tileMap = waterTileMap}))
                                 LevelTrans    -> soundProcess (setMusic (-1) g)
                                 Ending        -> return $ setMusic 13 g)
   where overWorld = levelProcess $ timedTick g
@@ -262,7 +262,7 @@ update g _ = handleMusic =<< (case state g of
         levelProcess g' = if levelTransDelay g' > 0
                           then if levelTransDelay g' == 1
                                then ((if currentLevel g' == 9 then (\s -> return (s {state = Ending, currentLevel = 0})) else loadLevel ("level" ++ show (currentLevel g')))
-                                      $ (if state g == OverWorld then queueSound 6 else id)
+                                      $ (if state g == OverWorld && currentLevel g' /= 9 then queueSound 6 else id)
                                        g {state = if state g == OverWorld then LevelTrans else OverWorld
                                         , levelTransDelay = 0})
                                else return (g' {levelTransDelay = levelTransDelay g' - 1})
@@ -273,11 +273,11 @@ update g _ = handleMusic =<< (case state g of
                     then tick g' {framesSinceTick = 0}
                     else g' {framesSinceTick = framesSinceTick g' + 1}
 
-        titleLax = do r <- randomIO :: IO Int
-                      v <- randomIO :: IO Int
-                      let g' = if (fromIntegral (r `mod` 1000)) < ((10 - (fromIntegral $ length $ boxes g))**3)
-                               then g {boxes = boxes g ++ singleton (spawnRandomLax r)} else g
-                      return (timedTick g')
+        titleLax g = do r <- randomIO :: IO Int
+                        v <- randomIO :: IO Int
+                        let g' = if (fromIntegral (r `mod` 1000)) < ((10 - (fromIntegral $ length $ boxes g))**3)
+                                 then g {boxes = boxes g ++ singleton (spawnRandomLax r)} else g
+                        return (timedTick g')
 
         spawnRandomLax r = let xs = [(0,i) | i <- [0..11]] ++ [(12,i) | i <- [0..11]] ++ [(i,0) | i <- [1..11]] ++ [(i,11) | i <- [1..11]]
                                (x,y) = xs !! (r `mod` length xs)
@@ -433,7 +433,7 @@ loadSounds :: IO [Chunk]
 loadSounds = mapM (\(filename, vol) -> M.load ("Sounds/" ++ filename) >>= (\c -> setVolume vol c >> return c))
              [("light_hit.wav", 64), ("medium_hit.wav", 50), ("hard_hit.wav", 64)
              , ("egg1.wav", 64), ("egg2.wav", 64), ("egg3.wav", 64), ("goodlax.wav", 64),("laxeggcrack.wav", 64)
-             , ("new watersound.wav", 64),("walkoneggtesteww.wav", 64),("yaylax.wav", 64), ("laxmusik.wav", 32), ("laxtitle.wav", 32), ("laxending.wav", 32)]
+             , ("new watersound.wav", 64),("walkoneggtesteww.wav", 64),("yaylax.wav", 64), ("laxmusik.wav", 16), ("laxtitle.wav", 16), ("laxending.wav", 16)]
 
 --loadMusic :: IO [Music]
 --loadMusic = mapM (M.load . ("Sounds/" ++)) []
