@@ -99,6 +99,7 @@ data GameState =
               ,clone           :: Either (Pos, Bool) Entity
               ,boxes           :: [Entity]
               ,moves           :: [(Int,Int)]
+              ,moveCounter     :: Int
               ,player          :: Entity
               ,history         :: [(Either (Pos, Bool) Entity, [Entity], [(Int,Int)], Entity)]
               ,levelTransDelay :: Int
@@ -110,7 +111,7 @@ tryUndo :: GameState -> GameState
 tryUndo g = if null $ history g then g
             else let h'            = tail (history g)
                      (c, b, m, p)  = head (history g)
-                 in g {history = h', clone = c, boxes = b, moves = m, player = p}
+                 in g {history = h', clone = c, boxes = b, moves = m, player = p, moveCounter = moveCounter g - 1}
 
 eitherToMaybe :: Either a b -> Maybe b
 eitherToMaybe (Left a)  = Nothing
@@ -142,11 +143,11 @@ getTile p = fromJust . safeTile p
 
 draw :: GameState -> Int -> GraphicalProcess
 draw g frameCount = case state g of
-                      OverWorld      -> tileGrid <> drawBoxes <> drawClone <> drawPlayer <> drawMoves
+                      OverWorld      -> tileGrid <> drawBoxes <> drawClone <> drawPlayer <> drawMoves <> drawMoveCounter
                       LevelTrans     -> levelTransDraw <> text font black (V2 80 30) "Press any key to contiue to next level"
                       TitleScreen m  -> tileGridTitle <> drawFishBoxes <> drawMenu font (concat textrs) m <> title
                       Ending         -> drawEnd <> text font black (V2 80 30) "Press any key to return to title screen"
-  where (MkGameState textrs _ _ _ font tilem s c b m (MkEntity (x, y) _) _ ltd _ _) = g
+  where (MkGameState textrs _ _ _ font tilem s c b m moveCount (MkEntity (x, y) _) _ ltd _ _) = g
 
         drawTile :: TileID -> Pos -> GraphicalProcess
         drawTile tileid (x, y) = display ((textrs !! tileid) !! ((frameCount `div` animDelay) `mod` length (textrs !! tileid)))
@@ -155,6 +156,8 @@ draw g frameCount = case state g of
         drawMoves  = mconcat
                      $ map (\(u, i) -> displayRotated (head (last textrs)) (V2 ((i+1)*tile) 32 , V2 tile tile) (moveAngle u))
                      $ zip m [0..]
+
+        drawMoveCounter = text font white (V2 400 30) "Move:" <> text font white (V2 500 30) (show moveCount)
 
         moveAngle :: (Int, Int) -> Double
         moveAngle (0,  1) = 180
@@ -208,7 +211,7 @@ tileMapSearch f tilem = concat $ zipWith (\i -> map (\x' -> (x', i))) [0..] (map
 
 
 loadLevel :: FilePath -> GameState -> IO GameState
-loadLevel p g = fmap (\t -> g {boxes = boxGen t, player = playerGen t, clone = cloneGen t, tileMap = tileGen t, history = [], moves = []}) $ loadScene p
+loadLevel p g = fmap (\t -> g {boxes = boxGen t, player = playerGen t, clone = cloneGen t, tileMap = tileGen t, history = [], moves = [], moveCounter = 0}) $ loadScene p
   where tileGen :: TileMap -> TileMap 
         tileGen t = (map . map) (\x -> if x `elem` [2,3,4] then 1 else x) t
 
@@ -292,7 +295,8 @@ walk (u, v) g = if onGoingTick g
                      in g {player = MkEntity p (u,v)
                          , clone = fmap (\(MkEntity a _) -> MkEntity a (head $ moves g)) $ clone g
                          , moves = keep 3 $ (moves g ++ if record then [(u,v)] else [])
-                         , history = (clone g, boxes g, moves g, player g) : history g}
+                         , history = (clone g, boxes g, moves g, player g) : history g
+                         , moveCounter = moveCounter g + 1}
   where keep n = reverse . take n . reverse
 
         record = case clone g of
@@ -322,10 +326,10 @@ tick g = hitSounds g $ levelTrans $ subtick g
         activateEgg  :: GameState -> GameState
         activateEgg g = case clone g of
                           Right a     -> g
-                          Left (p, _) -> if pos (player g) == p
-                                         then g {clone = Left (p, True)}
+                          Left (p, _) -> if let MkEntity (x,y) (w,h) = player g in (x+w, y+h) == p
+                                         then queueSound 9 (g {clone = Left (p, True)})
                                          else if length (moves g) >= 3
-                                              then queueSound 9 (g {clone = Right (MkEntity p (0,0))})
+                                              then queueSound 7 (g {clone = Right (MkEntity p (0,0))})
                                               else g
 
         moveEntities :: GameState -> GameState
@@ -432,8 +436,8 @@ loadTextures =
 loadSounds :: IO [Chunk]
 loadSounds = mapM (\(filename, vol) -> M.load ("Sounds/" ++ filename) >>= (\c -> setVolume vol c >> return c))
              [("light_hit.wav", 64), ("medium_hit.wav", 50), ("hard_hit.wav", 64)
-             , ("egg1.wav", 64), ("egg2.wav", 64), ("egg3.wav", 64), ("goodlax.wav", 64),("laxeggcrack.wav", 64)
-             , ("new watersound.wav", 64),("walkoneggtesteww.wav", 64),("yaylax.wav", 64), ("laxmusik.wav", 16), ("laxtitle.wav", 16), ("laxending.wav", 16)]
+             , ("egg1.wav", 64), ("egg2.wav", 64), ("egg3.wav", 64), ("goodlax.wav", 40),("laxeggcrack.wav", 100)
+             , ("new watersound.wav", 64),("walkoneggtesteww.wav", 64),("yaylax.wav", 64), ("laxmusik.wav", 10), ("laxtitle.wav", 16), ("laxending.wav", 16)]
 
 --loadMusic :: IO [Music]
 --loadMusic = mapM (M.load . ("Sounds/" ++)) []
@@ -447,9 +451,9 @@ men f = dir' (color orange $ vtextbutton p "start" ()
                <> noInterText (v + offset 2) "fish: art, level design, sound design, fish"
                <> noInterText (v + offset 3) "chiminiio: tile art"
                <> noInterText (v + offset 4) "font from Daniel Linssen (check out itch.io)"
-               <> noInterText (v + offset 6) "All art is original"
-               <> noInterText (v + offset 7) "Written in haskell with SDL2"
-               <> noInterText (v + offset 8) "Code licence is GPL3"
+               <> noInterText (v + offset 6) "Written in haskell with SDL2"
+               <> noInterText (v + offset 7) "Feel free to reuse the code"
+               <> noInterText (v + offset 8) "URL https://github.com/pavenpaven/salmon-run"
                
         p = (V2 (5*tileWidth + 40) 300)
         v = (V2 (1*tileWidth - 20) 300)
@@ -464,7 +468,7 @@ initialGame =
      textrs <- loadTextures
      f      <- F.load fontFilePath fontPointSize
      sounds <- liftIO loadSounds
-     return (MkGameState textrs sounds (take (length sounds) $ repeat False) (-1, -1) f waterTileMap (TitleScreen (men f)) (Left ((-1,-1), False)) [] [] (MkEntity (3,2) (0, 0)) [] 0 0 0) 
+     return (MkGameState textrs sounds (take (length sounds) $ repeat False) (-1, -1) f waterTileMap (TitleScreen (men f)) (Left ((-1,-1), False)) [] [] 0 (MkEntity (3,2) (0, 0)) [] 0 0 0) 
      
 waterTileMap = [[1 | i <- [1..13]] | j <- [1..12]]
           
